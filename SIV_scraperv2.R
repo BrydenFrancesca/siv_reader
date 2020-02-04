@@ -1,5 +1,12 @@
 setwd("L:/Prices/Dashboards/SIV")
 
+if (!require("pacman")) install.packages("pacman")
+library(pacman)
+pacman::p_load(zoo, dplyr, readxl, xlsx, ggplot2, openxlsx, data.table, xml2, XML, 
+               purrr, readr, stringr, reshape2, data.table ,pdftools, shiny, writexl, 
+               DT, tidyr, tibble, tabulizer, rvest, pdftools, shinythemes)
+
+
 library(zoo)
 library(dplyr)
 library(readxl)
