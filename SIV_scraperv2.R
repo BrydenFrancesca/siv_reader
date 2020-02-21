@@ -1,68 +1,36 @@
-setwd("L:/Prices/Dashboards/SIV")
-
 if (!require("pacman")) install.packages("pacman")
 library(pacman)
-pacman::p_load(zoo, dplyr, readxl, xlsx, ggplot2, openxlsx, data.table, xml2, XML, 
-               purrr, readr, stringr, reshape2, data.table ,pdftools, shiny, writexl, 
-               DT, tidyr, tibble, tabulizer, rvest, pdftools, shinythemes)
+pacman::p_load(zoo, dplyr, readxl, xml2, XML, purrr, readr, stringr, reshape2, 
+               data.table, pdftools, shiny, writexl, DT, tidyr, tibble, tabulizer, rvest, pdftools, shinythemes)
 
-
-library(zoo)
-library(dplyr)
-library(readxl)
-library(xlsx)
-library(ggplot2)
-library(openxlsx)
-library(data.table)
-library(xml2)
-library(XML)
-library(purrr)
-library(readr)
-library(stringr)
-library(reshape2)
-library(data.table)
-library(pdftools)
-library(shiny)
-library(writexl)
-library(DT)
-library(tidyr)
-library(tibble)
-library(tabulizer)
-library(rvest)
-library(pdftools)
-library(shinythemes)
-
+#Download web page 
 filePath="https://ec.europa.eu/info/food-farming-fisheries/farming/facts-and-figures/markets/overviews/market-observatories/fruit-and-vegetables/fruit-and-vegetables-various-statistics_en"
 download.file(filePath, destfile = "Data/temp_files/scrapedpage.html", quiet=TRUE)
 
 ui <- fluidPage(theme = shinytheme("cosmo"),
                 
-                # Sidebar layout with a input and output definitions ----
-                navbarPage("SIV scraper",
-                           
-                           tabPanel("SIV data",
-                                    
-                                    # Output: Verbatim text for data summary ----
-                                    hr(),
-                                    actionButton("submitSIV", "Submit"),
-                                    downloadButton("dl_SIV", "Download"),
-                                    hr(),
-                                    DTOutput("SIV_view"))
-                                             
-                )#end of navbar page
-)#end of UI
-
+      # Sidebar layout with a input and output definitions ----
+      navbarPage("SIV scraper",
+                 tabPanel("SIV data",
+                          # Output: Verbatim text for data summary ----
+                          hr(),
+                          actionButton("submitSIV", "Submit"),
+                          downloadButton("dl_SIV", "Download"),
+                          hr(),
+                          DTOutput("SIV_view"))
+                 )#end of navbar page
+      )#end of UI
 
 server <- function(input, output, session) {
-  
+
+  ##Get address of PDF file  
   address=function(){
     page <- read_html("Data/temp_files/scrapedpage.html")
     page %>%
       html_nodes("a") %>%       # find all links
       html_attr("href") %>%     # get the url
-      str_subset("\\.pdf") %>% # find those that end in xlsx
-      .[[5]]                    # look at the first one
-
+      str_subset("\\.pdf") %>% # find those that end in pdf
+      .[[5]]                    # look at the fifth one
   }
 
   SIV_data=reactiveFileReader(
@@ -71,38 +39,28 @@ server <- function(input, output, session) {
     filePath=address(),
     readFunc = function(filePath) {
        download.file(filePath, destfile="Data/temp_files/SIV.pdf", mode="wb")
-      data = pdf_data("Data/temp_files/SIV.pdf")
-      data <- data[[1]]
+      data <- pdf_data("Data/temp_files/SIV.pdf")[[1]]
       data
-    }
-  )
-  # SIV_data = reactive({
-  #   data = pdf_data("Data/temp_files/SIV.pdf")
-  #   data <- data[[1]]
-  #   data
-  # 
-  # })
-  ##Reactive to find data date
+    })
+
+  ##Find and clean data date
   SIV_date = reactive({
   SIV_date_row <- SIV_data()[grep("Date:", SIV_data()$text),4]
   SIV_data_date <- SIV_data() %>% filter(y == as.numeric(SIV_date_row))
   SIV_data_date$text <- as.Date(SIV_data_date$text, format = "%d/%m/%Y") 
-  SIV_data_date <- na.omit(SIV_data_date)
-  SIV_data_date <- SIV_data_date %>% dplyr::pull(text) 
-  SIV_data_date})
+  SIV_data_date <- SIV_data_date %>% na.omit() %>% dplyr::pull(text) 
+  })
   
-
   SIV_data_clean = reactive({
-  ##Remove comment
-  #Remove starting rows
+  #Remove meta data rows
   meta_row <- SIV_data()[grep("Product", SIV_data()$text), 4]
   daily_data <- SIV_data() %>% filter(y >= as.numeric(meta_row))
   
   ##Clean data
-  find_cols <- daily_data %>% filter(text == "Product"| text == "Designation"| text == "Origin"| text == "Country"| text == "Market"| text == "Value"| text == "Quantity")  
-  find_cols <- find_cols$x - c(1,13,8, 36, 21, 1, 1) 
+  find_cols <- daily_data %>% filter(text %in% c("Product", "Designation", "Origin", "Country", "Market", "Value", "Quantity"))  
+  find_cols <- find_cols$x - c(1,13,8,36, 21, 1, 1) 
   find_rows <- unique(daily_data$y)
-  find_rows <- find_rows[c(-1)]
+  find_rows <- find_rows[-1]
   find_start <- min(daily_data$x)-1
   
   ##Turn into table
@@ -112,43 +70,42 @@ server <- function(input, output, session) {
     filter(col != "(39,92]") %>%
     arrange(col, row) %>% 
     group_by(col, row) %>% 
-    dplyr::mutate(text = paste(text, collapse = " ")) %>% 
+    mutate(text = paste(text, collapse = " ")) %>% 
     ungroup() %>%
     select(row, text, col) %>% 
     unique() %>% 
     spread(col, text) %>%
     select(-row)
   
-  ##Change col names
+  #Change col names
   colnames(clean_data) <- clean_data[1,]
   clean_data <- clean_data[-1,]
-  clean_data <- clean_data[which(!is.na(colnames(clean_data)))]
-  clean_data <- clean_data %>% select(Designation, `Origin Code`, Country, `Market Place`, Value, Quantity)
-  
+   clean_data <- clean_data[which(!is.na(colnames(clean_data)))]
+   clean_data <- clean_data %>% select(Designation, `Origin Code`, Country, `Market Place`, Value, Quantity)
+   
   ##Fill down data
   clean_data <- fill(clean_data, 1:3)
-  
+
   ##Clean lemon data
   clean_data$Designation <- gsub("limonum)", "Lemons", clean_data$Designation)
-  clean_data <- clean_data %>% 
+  clean_data <- clean_data %>%
     na.omit() %>%
-     filter(`Market Place`=="London") %>%
-     mutate(Date = as.Date(SIV_date(), format = "%Y-%m-%d")) 
+     mutate(Date = as.Date(SIV_date(), format = "%Y-%m-%d"))
   })
-  
+
   ##Scrape in currency data
-  currency_conversion = reactive({ 
+  currency_conversion = reactive({
   fileURL <- "https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/gbp.xml"
   download.file(fileURL, destfile=tf <- tempfile(fileext=".xml"))
-  
+
   xml_file <- xmlParse(tf)
   xml_data <- xmlRoot(xml_file)
-  
+
   m <- t(xpathSApply(xml_data, "//*[@OBS_VALUE]", xmlAttrs))
   currency <- as_tibble(read.table(text = paste(m[, 1], m[, 2]), as.is = TRUE))
   colnames(currency) <- c("Date", "euro_to_pound")
   currency$Date <- as.Date(currency$Date)
-  currency <- currency %>% filter(Date > "2019-11-01")
+  currency <- currency %>% filter(Date > "2020-01-01")
   })
   
   ##Join data and currency conversion and calculate prices
@@ -164,7 +121,7 @@ server <- function(input, output, session) {
     readRDS("Data/backseries.RDS")
   })
   
-  ##Full series to save
+  ##Full series to save, avoiding duplication
   full_series = reactive({
     if(sum(grepl(SIV_date(), backseries()$Date)) != 0){
       backseries()}
@@ -175,13 +132,15 @@ server <- function(input, output, session) {
   
   weekly_series = reactive({
       full_series() %>% mutate(Date = strftime(Date, format = "%Y-%V")) %>% 
-      group_by(Designation, Country, Date) %>% summarise(Price = weighted.mean(Price, Quantity, na.rm = T), Quantity = sum(Quantity, na.rm = T))
+      group_by(Designation, Country, Date) %>% 
+      summarise(Price = weighted.mean(Price, Quantity, na.rm = T), 
+                Quantity = sum(Quantity, na.rm = T))
   })
   
   ##Save data on button press
   observeEvent(input$submitSIV, {
-    saveRDS(full_series(),file = file.path("L:/Prices/Dashboards/SIV/Data", "backseries.RDS"))
-    saveRDS(weekly_series(),file = file.path("L:/Prices/Dashboards/SIV/Data", "weeklyseries.RDS"))
+    saveRDS(full_series(),file = "Data/backseries.RDS")
+    saveRDS(weekly_series(),file = "Data/weeklyseries.RDS")
   })
   
   ##Popup window on data save
@@ -202,7 +161,7 @@ server <- function(input, output, session) {
   
   ##Data table
   output$SIV_view <- renderDT({
-    dataset <- full_series()   
+    dataset <- SIV_data_clean()   
     datatable(dataset, rownames = F,
               options = list(
                 scrollX = TRUE,
